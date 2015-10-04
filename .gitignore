@@ -1,0 +1,10 @@
+*.o
+/dns320l-cli
+/dns320l-daemon
+/test/test_debug
+/test/test_sockets
+/test/test_ini
+/test/test_log
+/test/test_str
+/test/test_leds
+/test/test_readserial
