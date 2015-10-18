@@ -5,6 +5,7 @@
 #include "serial.h"
 #include "str.h"
 #include <time.h>
+#include <stdio.h>
 
 #define TYPE_READ 1
 #define TYPE_READ_RAW 2
@@ -28,7 +29,7 @@ typedef struct  {
 /*
 void ralarm(int serial, const char *cmd) {
 	char *buf = malloc(7);
-	func function = table[i];
+	func function = tabl_inte[i];
 	memset(buf, '\0', function.size_read);
 	funs_do_get(serial, function.sequence, function.size, buf, function.size_read);
 	//log_string(LOG_INFO, buf, function.size_read, 30);
@@ -71,6 +72,7 @@ void ralarm(int serial, const char *cmd) {
 
 void hello(int serial, const char *cmd);
 void ralarm(int serial, const char *cmd);
+void walarm(int serial, const char *cmd);
 
 static func table[] = {
 	{ "DeviceReadyCmd",        { 0xfa, 0x30, 0x10, 0x00, 0x00, 0x00, 0xfb }, TYPE_READ , 7, 7, NULLP},
@@ -107,24 +109,31 @@ static func table[] = {
 	{ "quit", 				   { 0 }                                    , TYPE_QUIT,  0, 0, NULLP},
 	{ "hello", 				   { 0 }                                    , TYPE_CUSTOM,  0, 0, &hello},
 	{ "ralarm", 			   { 0 }                                    , TYPE_CUSTOM,  0, 0, &ralarm},
+	{ "walarm", 			   { 0 }                                    , TYPE_CUSTOM,  0, 0, &walarm},
 };
 #define NUM_TRIALS 20
 
 // returns 0=>ok, 1=>errors.
-int funs_do_get(int serial, const char *input, int input_size, char *output, int output_size) {
+int funs_do_set_get(int serial, const char *input, int input_size, char *output, int output_size, int value) {
 	char *buffer = (char *)malloc(256);
 	memset(buffer, '\0', output_size);
 	int i;
 	usleep(10000);
-	serial_write(serial, input, 7);
+	char *cmd = (char *)malloc(256);
+	memcpy(cmd,input,input_size);
+	if (value != -1) {
+		cmd[DATA_BIT] = to_hex_base8(value);
+	}
+	serial_write(serial, cmd, input_size);
+	free(cmd);
 	usleep(10000);
-	serial_read(serial, buffer, 7);
+	serial_read(serial, buffer, output_size);
 	int k = 1;
 	while (buffer[2] != input[2]) {
 		usleep(10000);
-		serial_write(serial, input, 7);
+		serial_write(serial, cmd, input_size);
 		usleep(10000);
-		serial_read(serial, buffer, 7);
+		serial_read(serial, buffer, output_size);
 		k++;
 		if (k > NUM_TRIALS) {
 			return 1;
@@ -135,8 +144,27 @@ int funs_do_get(int serial, const char *input, int input_size, char *output, int
 	return 0;
 }
 
-void funs_do_put(int serial, const char *input, int input_size) {
-	serial_write(serial, input, input_size);
+int funs_do_get(int serial, char *output, int output_size) {
+	char *buffer = (char *)malloc(256);
+	memset(buffer, '\0', output_size);
+	int i;
+	usleep(10000);
+	serial_read(serial, buffer, 7);
+	strncpy(output, buffer, output_size);
+	free(buffer);
+	return 0;
+}
+
+int funs_do_set_get_int(int serial, char *input, int size_write, int size_read, int value, int bit ) {
+	char *buf = malloc(size_read);
+	memset(buf, '\0', size_read);
+	if (funs_do_set_get(serial, input, size_write, buf, size_read, value) > 0) {
+		log_log(LOG_INFO, "Errore");
+		return -1;
+	}
+	int ret = to_int(buf[bit]);
+	free (buf);
+	return ret;
 }
 
 void funs_manage(int serial, const char *cmd) {
@@ -159,8 +187,7 @@ void funs_manage(int serial, const char *cmd) {
 				log_log(LOG_DEBUG, "READ");
 				buf = malloc(function.size_read);
 				memset(buf, '\0', function.size_read);
-				funs_do_get(serial, function.sequence, function.size, buf, function.size_read);
-				//log_string(LOG_INFO, buf, function.size_read, 30);
+				funs_do_set_get(serial, function.sequence, function.size, buf, function.size_read, -1);
 				log_log(LOG_INFO, "%d", to_int(buf[DATA_BIT]));
 				free(buf);
 				log_log(LOG_DEBUG, "DONE");
@@ -169,14 +196,15 @@ void funs_manage(int serial, const char *cmd) {
 				log_log(LOG_DEBUG, "READ_RAW");
 				buf = malloc(function.size_read);
 				memset(buf, '\0', function.size_read);
-				funs_do_get(serial, function.sequence, function.size, buf, function.size_read);
+				funs_do_set_get(serial, function.sequence, function.size, buf, function.size_read, -1);
 				log_string(LOG_INFO, buf, function.size_read, 30);
 				free(buf);
 				log_log(LOG_DEBUG, "DONE");
 				break;
 			case TYPE_WRITE: // write
 				log_log(LOG_DEBUG, "DONE");
-				funs_do_put(serial, function.sequence, function.size);
+				//funs_do_put(serial, function.sequence, function.size);
+				funs_do_set_get(serial, function.sequence, function.size, buf, function.size_read, -1);
 				break;
 			case TYPE_QUIT: // quit
 				log_log(LOG_INFO, "QUIT");
@@ -199,40 +227,94 @@ void hello(int serial, const char *cmd) {
 void ralarm(int serial, const char *cmd) {
 	int dd, mo, hh, mm, ss;
 	struct tm tm = *localtime(&(time_t) {time(NULL)});
-
 	func function = table[CMD_RAlarmHourCmd];
-	char *buf = malloc(function.size_read);
-
-	memset(buf, '\0', function.size_read);
-	if (funs_do_get(serial, function.sequence, function.size, buf, function.size_read) > 0) {
+	if ((hh = funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, -1, DATA_BIT)) < 0) {
 		log_log(LOG_INFO, "Errore");
 		return;
 	}
-
-	hh = to_int(buf[DATA_BIT]);
 	function = table[CMD_RAlarmMinuteCmd];
-	if (funs_do_get(serial, function.sequence, function.size, buf, function.size_read) > 0) {
+	if ((mm = funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, -1, DATA_BIT)) < 0) {
 		log_log(LOG_INFO, "Errore");
 		return;
 	}
-	mm = to_int(buf[DATA_BIT]);
 	function = table[CMD_RAlarmSecondCmd];
-	if (funs_do_get(serial, function.sequence, function.size, buf, function.size_read) > 0) {
+	if ((ss = funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, -1, DATA_BIT)) < 0) {
 		log_log(LOG_INFO, "Errore");
 		return;
 	}
-	ss = to_int(buf[DATA_BIT]);
 	function = table[CMD_RAlarmDateCmd];
-	if (funs_do_get(serial, function.sequence, function.size, buf, function.size_read) > 0) {
+	if ((dd = funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, -1, DATA_BIT)) < 0) {
 		log_log(LOG_INFO, "Errore");
 		return;
 	}
-	dd = to_int(buf[DATA_BIT]);
 	function = table[CMD_RAlarmMonthCmd];
-	if (funs_do_get(serial, function.sequence, function.size, buf, function.size_read) > 0) {
+	if ((mo = funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, -1, DATA_BIT)) < 0) {
 		log_log(LOG_INFO, "Errore");
 		return;
 	}
-	mo = to_int(buf[DATA_BIT]);
 	log_log(LOG_INFO, "Alarm set date %02d/%02d time %02d:%02d:%02d UTC", dd, mo, hh, mm, ss);
+}
+
+void walarm(int serial, const char *cmd) {
+	// walarm dd:mm hh:mm
+	char *token;
+	const char delimiters[] = " ";
+	token = strtok((char *)cmd, delimiters);
+	// token is "walarm"
+	char *ddmm = strtok(NULL, delimiters);
+	char *hhmm = strtok(NULL, delimiters);
+	int hh, mm, dd, mo;
+	sscanf(ddmm, "%d:%d", &dd, &mo);
+	sscanf(hhmm, "%d:%d", &hh, &mm);
+	log_log(LOG_INFO, " hh[%d] mm[%d] dd[%d] mo[%d]", hh, mm, dd, mo);
+	/*
+	read data: None
+	set value: '\xfa\x01\r\x02\x01\x00\xfb'
+	set value: '\xfa\x01\x0c\x02\x01\x13\xfb'
+	set value: '\xfa\x01\x0b\x02\x01\x18\xfb'
+	set value: '\xfa\x01\n\x02\x01\x10\xfb'
+	set value: '\xfa\x01\x10\x02\x01\x01\xfb'
+	read data: '\xfa0\x00\x00\x00\x00\xfb'
+	read data: '\xfa0\x00\x00\x00\x00\xfb'
+	read data: '\xfa0\x00\x00\x00\x00\xfb'
+	read data: None
+	set value: '\xfa\x01\r\x01\x01\x00\xfb'
+	read data: '\xfa\x01\r\x01\x01\x00\xfb'
+	set value: '\xfa\x01\x0c\x01\x01\x00\xfb'
+	read data: '\xfa\x01\x0c\x01\x01\x13\xfb'
+	set value: '\xfa\x01\x0b\x01\x01\x00\xfb'
+	read data: '\xfa\x01\x0b\x01\x01\x18\xfb'
+	set value: '\xfa\x01\n\x01\x01\x00\xfb'
+	read data: '\xfa\x01\n\x01\x01\x10\xfb'
+	*/
+	func function = table[CMD_WAlarmMinuteCmd];
+	function = table[CMD_WAlarmMinuteCmd];
+	funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, mm, DATA_BIT);
+	function = table[CMD_WAlarmHourCmd];
+	funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, hh, DATA_BIT);
+	function = table[CMD_WAlarmDateCmd];
+	funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, dd, DATA_BIT);
+	function = table[CMD_WAlarmMonthCmd];
+	funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, mo, DATA_BIT);
+	function = table[CMD_WAlarmEnableCmd];
+	funs_do_set_get_int(serial, function.sequence, function.size, function.size_read, 0, DATA_BIT);
+
+//
+	char *buffer = (char *)malloc(256);
+	memset(buffer, '\0', 7);
+	funs_do_get(serial, buffer, 7);
+	log_string(LOG_INFO, buffer, 7, 30);
+
+	memset(buffer, '\0', 7);
+	funs_do_get(serial, buffer, 7);
+	log_string(LOG_INFO, buffer, 7, 30);
+
+	memset(buffer, '\0', 7);
+	funs_do_get(serial, buffer, 7);
+	log_string(LOG_INFO, buffer, 7, 30);
+
+	memset(buffer, '\0', 7);
+	funs_do_get(serial, buffer, 7);
+	log_string(LOG_INFO, buffer, 7, 30);
+
 }
