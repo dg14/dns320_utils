@@ -65,7 +65,9 @@ int serial_open(char *dev, speed_t velocity) {
 }
 
 int serial_write ( int device, const char *ptr, int nchars) {
-    return write(  device, ptr, nchars);
+    int ret=write(  device, ptr, nchars);
+    tcflush( device, TCIFLUSH );
+    return ret;
 }
 
 #define TIMEOUT 10000
