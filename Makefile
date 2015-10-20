@@ -2,7 +2,7 @@
 .DEFAULT_GOAL = all
 CC?=gcc
 CFLAGS?=-I. -I../src -Isrc
-LIBS= -lpthread
+LIBS= -lpthread -lm
 DEPS = dns320l.h
 #OBJ = src/serial.o src/ini.o src/str.o src/socket.o src/proto.o src/debug.o src/log.o src/handlers.o
 OBJ = src/serial.o src/ini.o src/str.o src/socket.o src/funs.o src/debug.o src/log.o 
